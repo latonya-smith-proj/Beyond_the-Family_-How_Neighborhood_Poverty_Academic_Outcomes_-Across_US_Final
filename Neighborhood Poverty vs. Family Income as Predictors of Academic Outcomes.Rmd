@@ -1,0 +1,322 @@
+---
+title: "Neighborhood Poverty vs. Family Income as Predictors of Academic Outcomes"
+output: html_document
+date: "2026-04-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+I consulted Claude.io for information about how to write this code. Lines 254-283 of this code file were copied from claude to create the interaction plots. I also used it for 191 to 211 to combine the posterior graphs of 
+
+https://stackoverflow.com/questions/bayesian-inference-in-R was consulted for information (Be sure to include enough information that I can find the page you looked at!).
+
+# Research Question:Neighborhood Poverty vs. Family Income as Predictors of Academic Outcomes
+
+
+### Data Ingestion
+```{r}
+library(tidyverse)
+test_scores<- read_csv("seda_geodist_pool_cs_6.0.csv") 
+
+socioeconomics<- read_csv("seda_cov_geodist_pool_6.0.csv")
+```
+
+```{r}
+#Merge using an inner join.
+
+merged<- inner_join(test_scores, socioeconomics, by = "sedalea")
+
+
+#Subseting dataset to use the variables i need
+#For all students
+
+df_all <- merged %>%
+  filter(subgroup == "all") %>%
+  select(sedalea, sedaleaname.x, cs_mn_avg_ol,
+         lninc50avgall, povertyavgall, urbanicity) %>%
+  rename(distname     = sedaleaname.x,
+         test_score   = cs_mn_avg_ol,
+         fam_income   = lninc50avgall,
+         nbhd_poverty = povertyavgall) %>%
+  drop_na(test_score, fam_income, nbhd_poverty, urbanicity) %>%
+  mutate(urbanicity = factor(urbanicity,
+                             levels = c("City", "Suburb", "Town", "Rural")))
+
+
+table(df_all$urbanicity)
+summary(df_all)
+```
+
+
+### Univariate Analysis for All students
+```{r}
+library(ggplot2)
+#Test Scores
+hist(df_all$test_score, main = paste("Distribution of Average Test Scores by District"), xlab = "Meant Test Score (Cohort Scale)", ylab = "Number of Districts", col = "lightyellow")
+
+#Family Income
+hist(df_all$fam_income, main = paste("Distiribution of Median Household Income by District"), xlab = "Log Median Family Income Averaged over all Students", ylabcol ="lightblue2")
+
+#Neighborhood Poverty Rate
+hist(df_all$nbhd_poverty, main = paste("Distribution of Child Poverty over Districts"), xlab = "Proportion of Children in Poverty", ylab = "Number of Districts", col="pink")
+
+#Test scores over Neighborhood type
+ggplot(df_all, aes(x = urbanicity, fill = urbanicity)) +
+  geom_bar(color = "white") +
+  scale_fill_manual(values = c("City"   = "steelblue",
+                               "Suburb" = "darkseagreen",
+                               "Town"   = "goldenrod",
+                               "Rural"  = "firebrick")) +
+  labs(title = "Number of Districts by Urbanicity",
+       x = "District Type",
+       y = "Number of Districts") +
+  theme(legend.position = "none")
+
+```
+
+
+### Bivariate Analysis All Students
+```{r}
+library(ggplot2)
+
+#Family Income vs Test Scores
+ggplot(df_all, aes(x = fam_income, y = test_score)) +
+  geom_point(alpha = 0.3, size = 0.8) +
+  geom_smooth(method = "lm", color = "orchid2", se = TRUE) +
+  labs(title = "Family Income vs. Test Scores",
+       subtitle = "The conventional story",
+       x = "Log Median Household Income",
+       y = "Mean Test Score")
+
+
+
+# Neighborhood Poverty vs Test Scores 
+ggplot(df_all, aes(x = nbhd_poverty, y = test_score)) +
+  geom_point(alpha = 0.3, size = 0.8) +
+  geom_smooth(method = "lm", color = "orangered2", se = TRUE) +
+  labs(title = "Neighborhood Poverty Rate vs. Test Scores",
+       subtitle = "The neighborhood story",
+       x = "Share of Children in Poverty",
+       y = "Mean Test Score")
+
+
+#checking for collinearity
+#Family Income vs Neighborhood Poverty
+ggplot(df_all, aes(x = fam_income, y = nbhd_poverty)) +
+  geom_point(alpha = 0.3, size = 0.8) +
+  geom_smooth(method = "lm", color = "chartreuse", se = TRUE) +
+  labs(title = "Family Income vs Neighborhood Poverty",
+       subtitle = "How Correlated are the two predictors",
+       x = "Log Median Household Income",
+       y = "Proportion of Chidren in Poverty")
+
+
+#Test scores by urbanicity 
+ggplot(df_all, aes(x = urbanicity, y = test_score, fill = urbanicity)) +
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_manual(values = c("City"   = "steelblue",
+                               "Suburb" = "darkseagreen",
+                               "Town"   = "goldenrod",
+                               "Rural"  = "firebrick")) +
+  labs(title = "Test Scores by Urbanicity",
+       subtitle = "How does district type relate to academic performance?",
+       x = "District Type",
+       y = "Mean Test Score") +
+  theme(legend.position = "none")
+
+
+#Neighborhood poverty by urbanicity
+ggplot(df_all, aes(x = urbanicity, y = nbhd_poverty, fill = urbanicity)) +
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_manual(values = c("City"   = "steelblue",
+                               "Suburb" = "darkseagreen",
+                               "Town"   = "goldenrod",
+                               "Rural"  = "firebrick")) +
+  labs(title = "Neighborhood Poverty by Urbanicity",
+       subtitle = "Do poverty rates differ across district types?",
+       x = "District Type",
+       y = "Share of Children in Poverty") +
+  theme(legend.position = "none")
+
+
+
+```
+
+## Frequentist Analysis
+
+```{r}
+#Correlation plots - all students
+cor.test(df_all$fam_income,   df_all$test_score)
+cor.test(df_all$nbhd_poverty, df_all$test_score)
+
+```
+
+###Regression Models
+```{r}
+library(car)
+#All students
+model1<- lm(test_score ~ fam_income + nbhd_poverty + urbanicity,data = df_all)
+
+vif(model1)
+summary(model1)
+
+```
+
+## Bayesian Method
+```{r}
+
+#For all students
+library(BayesFactor)
+lmBF<- lmBF(test_score ~ fam_income + nbhd_poverty + urbanicity, data=df_all, posterior = TRUE, iterations=10000)
+
+
+summary(lmBF)
+par(mar = c(2, 2, 2, 2))
+plot(lmBF)
+
+```
+
+
+### #Posterior Distribution Plots
+```{r}
+
+post_all    <- as.data.frame(lmBF)
+
+colnames(post_all)
+```
+```{r}
+# ── COMBINED POSTERIOR — family income and neighborhood poverty ────────────────
+post_long <- post_all %>%
+  select(`fam_income-fam_income`, `nbhd_poverty-nbhd_poverty`) %>%
+  pivot_longer(cols = everything(),
+               names_to  = "predictor",
+               values_to = "value") %>%
+  mutate(predictor = case_when(
+    predictor == "fam_income-fam_income"     ~ "Family Income",
+    predictor == "nbhd_poverty-nbhd_poverty" ~ "Neighborhood Poverty"
+  ))
+
+ggplot(post_long, aes(x = value, fill = predictor)) +
+  geom_density(alpha = 0.6, color = "white") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  scale_fill_manual(values = c("Family Income"        = "steelblue",
+                               "Neighborhood Poverty" = "firebrick")) +
+  facet_wrap(~ predictor, scales = "free_x") +
+  labs(title    = "Posterior Distributions of Predictor Effects",
+       subtitle = "Dashed line = zero effect",
+       x = "Coefficient Value",
+       y = "Density") +
+  theme(legend.position = "none")
+
+# ── FAMILY INCOME POSTERIOR ───────────────────────────────────────────────────
+ggplot(post_all, aes(x = `fam_income-fam_income`)) +
+  geom_density(fill = "steelblue", alpha = 0.6, color = "white") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = mean(post_all$`fam_income-fam_income`),
+             color = "firebrick", linewidth = 1) +
+  labs(title    = "Posterior Distribution — Family Income Effect",
+       subtitle = "Red line = posterior mean, dashed = zero",
+       x = "Coefficient Value",
+       y = "Density")
+
+# ── NEIGHBORHOOD POVERTY POSTERIOR ────────────────────────────────────────────
+ggplot(post_all, aes(x = `nbhd_poverty-nbhd_poverty`)) +
+  geom_density(fill = "firebrick", alpha = 0.6, color = "white") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = mean(post_all$`nbhd_poverty-nbhd_poverty`),
+             color = "steelblue", linewidth = 1) +
+  labs(title    = "Posterior Distribution — Neighborhood Poverty Effect",
+       subtitle = "Red line = posterior mean, dashed = zero",
+       x = "Coefficient Value",
+       y = "Density")
+
+
+# ── CREDIBLE INTERVALS ────────────────────────────────────────────────────────
+ci_all    <- quantile(post_all$`nbhd_poverty-nbhd_poverty`,
+                      probs = c(0.025, 0.975))
+
+```
+
+#### Supplemental Analysis about Urbanicity and 
+```{r}
+df_all <- df_all %>%
+  mutate(income_group = case_when(
+    fam_income < quantile(fam_income, 0.33) ~ "Low Income",
+    fam_income < quantile(fam_income, 0.67) ~ "Middle Income",
+    TRUE                                     ~ "High Income"
+  ) %>% factor(levels = c("High Income", "Middle Income", "Low Income")))
+
+```
+
+#### Interaction Plots
+```{r}
+#Income group and neighborhood poverty
+ggplot(df_all, aes(x = nbhd_poverty, y = test_score, color = income_group)) +
+  geom_point(alpha = 0.2, size = 0.7) +
+  geom_smooth(method = "lm", se = TRUE) +
+  scale_color_manual(values = c("Low Income"    = "firebrick",
+                                "Middle Income" = "goldenrod",
+                                "High Income"   = "steelblue")) +
+  labs(title    = "Does Neighborhood Poverty Hurt Low-Income Districts More?",
+       subtitle = "Steeper slope for low income = interaction effect",
+       x = "Share of Children in Poverty",
+       y = "Mean Test Score",
+       color = "Income Group")
+```
+```{r}
+#Urbanicity and neighborhood poverty
+
+ggplot(df_all, aes(x = nbhd_poverty, y = test_score, color = urbanicity)) +
+  geom_point(alpha = 0.2, size = 0.7) +
+  geom_smooth(method = "lm", se = TRUE) +
+  scale_color_manual(values = c("City"   = "steelblue",
+                                "Suburb" = "darkseagreen",
+                                "Town"   = "goldenrod",
+                                "Rural"  = "firebrick")) +
+  labs(title    = "Neighborhood Poverty vs. Test Scores by District Type",
+       subtitle = "Different slopes = interaction effect",
+       x = "Share of Children in Poverty",
+       y = "Mean Test Score",
+       color = "District Type")
+```
+
+#### Frequentist Interaction Models
+
+```{r}
+# Interaction 1: poverty and income group
+model2<- lm(test_score ~ fam_income + nbhd_poverty * income_group,data = df_all)
+summary(model2)
+
+# Interaction 2: poverty and urbanicity
+freq_int_urban <- lm(test_score ~ fam_income + nbhd_poverty * urbanicity, data = df_all)
+summary(freq_int_urban)
+
+```
+
+#### Bayesian Interaction Models
+
+```{r}
+# Interaction 1: poverty and income group
+lmBF2 <- lmBF(
+  test_score ~ fam_income + nbhd_poverty + income_group + nbhd_poverty:income_group,
+  data       = as.data.frame(df_all),
+  posterior  = TRUE,
+  iterations = 10000
+)
+summary(lmBF2)
+par(mar = c(2, 2, 2, 2))
+plot(2)
+
+
+lmBF3 <- lmBF(
+  test_score ~ fam_income + nbhd_poverty + urbanicity + nbhd_poverty:urbanicity,
+  data       = as.data.frame(df_all),
+  posterior  = TRUE,
+  iterations = 10000
+)
+summary(lmBF3)
+par(mar = c(2, 2, 2, 2))
+plot(lmBF3)
+```
